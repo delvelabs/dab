@@ -15,7 +15,7 @@ from subprocess import check_output
 SSH_PORTS = [22]
 
 # TLS-enabled Ports
-TLS_PORTS = [443] 
+TLS_PORTS = [443, 5002] 
 
 # NBT ports
 NBT_PORTS = [139, 445]
@@ -85,8 +85,10 @@ for port in TLS_PORTS:
         process = subprocess.Popen(['openssl', 'x509', '-fingerprint', '-noout', '-in', '/dev/stdin'],stdout=subprocess.PIPE,stdin=subprocess.PIPE, stderr=subprocess.PIPE)
         process.stdin.write(raw_cert)
         fingerprint = process.communicate()[0].decode('utf-8')
-        fingerprint = fingerprint.strip('\n')
-        results['ssl_fingerprints'].append(fingerprint.split('=')[1])
+        if fingerprint:
+            fingerprint = fingerprint.strip('\n')
+            print(repr(fingerprint))
+            results['ssl_fingerprints'].append(fingerprint.split('=')[1])
 
 for port in NBT_PORTS:
     connected = True
