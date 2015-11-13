@@ -34,10 +34,6 @@ class Dab:
     # TLS-enabled Ports
     TLS_PORTS = [443, 5002] 
 
-    # NBT ports
-    NBT_PORTS = [139, 445]
-
-
     def __init__(self, address):
         self.address = address
         self.fingerprints = []
@@ -60,6 +56,7 @@ class Dab:
 
         yield from self._apply_on_open_ports(self.SSH_PORTS, self._ssh_keyscan)
         yield from self._apply_on_open_ports(self.TLS_PORTS, self._ssl_fingerprint)
+        yield from self._nbt_hostscan()
 
 
     @asyncio.coroutine
@@ -117,10 +114,10 @@ class Dab:
             os.remove(fp.name)
 
     @asyncio.coroutine
-    def _nbt_hostscan(self, port):
+    def _nbt_hostscan(self):
         client = NetBIOS.NetBIOS()
         nbt_name = client.queryIPForName(self.address, timeout=1)
-        if len(nbt_name) > 0:
+        if nbt_name and len(nbt_name) > 0:
             self.add_fingerprint('nbt_hostname', nbt_name[0])
         
     @asyncio.coroutine
