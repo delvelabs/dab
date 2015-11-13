@@ -26,7 +26,6 @@ freely, subject to the following restrictions:
 """
 import re
 import random
-import select
 import struct
 import string
 import time
@@ -47,9 +46,8 @@ class NetBIOS:
         :param boolean broadcast: A boolean flag to indicate if we should setup the listening UDP port in broadcast mode
         :param integer listen_port: Specifies the UDP port number to bind to for listening. If zero, OS will automatically select a free port number.
         """
-        self.broadcast = broadcast
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        if self.broadcast:
+        if broadcast:
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         if listen_port:
             self.sock.bind(('', listen_port))
@@ -65,10 +63,6 @@ class NetBIOS:
         self.sock.close()
         self.sock = None
 
-    def _write(self, data, ip, port):
-        assert self.sock, 'Socket is already closed'
-        self.sock.sendto(data, (ip, port))
-
     def _encode_name(self, name, type, scope=None):
         #
         # Contributed by Jason Anderson
@@ -78,10 +72,8 @@ class NetBIOS:
         """
         if name == '*':
             name = name + '\0' * 15
-        elif len(name) > 15:
-            name = name[:15] + chr(type)
         else:
-            name = name.ljust(15) + chr(type)
+            name = name[:15].ljust(15) + chr(type)
 
         def _do_first_level_encoding(m):
             s = ord(m.group(0))
@@ -122,7 +114,7 @@ class NetBIOS:
 
         trn_id = random.randint(1, 0xFFFF)
         data = self._prepare_net_name_query(trn_id, False)
-        self._write(data, ip, port)
+        self.sock.sendto(data, (ip, port))
         ret = self._poll_for_query_packet(trn_id, timeout)
         if ret:
             return list(map(lambda s: s[0], filter(lambda s: s[1] == self.TYPE_SERVER, ret)))
@@ -134,16 +126,13 @@ class NetBIOS:
         # Contributed by Jason Anderson
         #
         end_time = time.time() + timeout
-        while True:
-            try:
+        try:
+            while True:
                 _current = time.time()
                 if _current >= end_time:
                     return None
 
-                ready, _, _ = select.select([self.sock.fileno()], [], [], end_time - _current)
-                if not ready:
-                    return None
-
+                self.sock.settimeout(end_time - _current)
                 data, _ = self.sock.recvfrom(0xFFFF)
                 if len(data) == 0:
                     raise NotConnectedError
@@ -152,12 +141,8 @@ class NetBIOS:
 
                 if trn_id == wait_trn_id:
                     return ret
-            except select.error as ex:
-                if type(ex) is tuple:
-                    if ex[0] != errno.EINTR and ex[0] != errno.EAGAIN:
-                        raise ex
-                else:
-                    raise ex
+        except socket.timeout:
+            return None
 
     def _decode_ip_query_packet(self, data):
         if len(data) < self.HEADER_STRUCT_SIZE:

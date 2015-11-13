@@ -129,7 +129,7 @@ class Dab:
     @asyncio.coroutine
     def _nbt_hostscan(self):
         client = NetBIOS()
-        nbt_name = client.query_ip_for_name(self.address, timeout=1)
+        nbt_name = client.query_ip_for_name(self.address, timeout=0.5)
         if nbt_name and len(nbt_name) > 0:
             self.add_fingerprint('nbt_hostname', nbt_name[0])
         
