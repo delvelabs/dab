@@ -2,6 +2,7 @@
 # Dab, a host fingerprint generator
 # Delve Labs inc. 2015.
 
+import os
 import asyncio
 import re
 import argparse
@@ -9,9 +10,20 @@ import socket
 import ssl
 import sys
 import subprocess
+import tempfile
 
 from nmb import NetBIOS
 from subprocess import check_output
+
+
+class Fingerprint:
+
+    def __init__(self, type, value):
+        self.type = type
+        self.value = value
+
+    def __repr__(self):
+        return "{type} [{value}]".format(**self.__dict__)
 
 
 class Dab:
@@ -34,7 +46,7 @@ class Dab:
     def add_fingerprint(self, type, value):
         if value:  # Skip empty values from the result
             type = re.sub(r'[^\w+]', '_', type).lower()
-            self.fingerprints.append(dict(type=type, value=value))
+            self.fingerprints.append(Fingerprint(type=type, value=value))
 
 
     @asyncio.coroutine
@@ -59,13 +71,24 @@ class Dab:
 
     @asyncio.coroutine
     def _ssh_keyscan(self, port):
-        keyscan_out = check_output(['ssh-keyscan', "-p", str(port), self.address], stderr=subprocess.PIPE).decode('utf-8')
-        # Strip ending \n
-        keyscan_out = keyscan_out.strip('\n')
+        fp = tempfile.NamedTemporaryFile(delete=False)
+
+        command = ['ssh-keyscan', "-p", str(port), self.address]
+        proc = yield from asyncio.create_subprocess_exec(*command, stdout=fp, stderr=asyncio.subprocess.DEVNULL)
+        yield from proc.wait()
+        fp.close()
+
+        command = ["ssh-keygen", "-l", "-f", fp.name]
+        proc = yield from asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+        keyscan_out = yield from proc.stdout.read()
+        os.remove(fp.name)
+        yield from proc.wait()
+
+        keyscan_out = keyscan_out.decode('utf8').strip('\n')
         entries = keyscan_out.split('\n')
         for entry in entries:
-            ip, htype, b64hash = entry.split(' ')
-            self.add_fingerprint(htype, b64hash)
+            bytecount, hash, address, type = entry.split(' ')
+            self.add_fingerprint("%s_%s" % (type.strip('()'), bytecount), hash)
 
     @asyncio.coroutine
     def _ssl_fingerprint(self, port):
