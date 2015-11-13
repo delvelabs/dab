@@ -71,36 +71,50 @@ class Dab:
 
     @asyncio.coroutine
     def _ssh_keyscan(self, port):
-        fp = tempfile.NamedTemporaryFile(delete=False)
+        try:
+            fp = tempfile.NamedTemporaryFile(delete=False)
 
-        command = ['ssh-keyscan', "-p", str(port), self.address]
-        proc = yield from asyncio.create_subprocess_exec(*command, stdout=fp, stderr=asyncio.subprocess.DEVNULL)
-        yield from proc.wait()
-        fp.close()
+            command = ['ssh-keyscan', "-p", str(port), self.address]
+            proc = yield from asyncio.create_subprocess_exec(*command, stdout=fp, stderr=asyncio.subprocess.DEVNULL)
+            yield from proc.wait()
+            fp.close()
 
-        command = ["ssh-keygen", "-l", "-f", fp.name]
-        proc = yield from asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-        keyscan_out = yield from proc.stdout.read()
-        os.remove(fp.name)
-        yield from proc.wait()
+            command = ["ssh-keygen", "-l", "-f", fp.name]
+            proc = yield from asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            keyscan_out = yield from proc.stdout.read()
+            yield from proc.wait()
 
-        keyscan_out = keyscan_out.decode('utf8').strip('\n')
-        entries = keyscan_out.split('\n')
-        for entry in entries:
-            bytecount, hash, address, type = entry.split(' ')
-            self.add_fingerprint("%s_%s" % (type.strip('()'), bytecount), hash)
+            keyscan_out = keyscan_out.decode('utf8').strip('\n')
+            entries = keyscan_out.split('\n')
+            for entry in entries:
+                bytecount, hash, address, type = entry.split(' ')
+                self.add_fingerprint("%s_%s" % (type.strip('()'), bytecount), hash)
+
+        finally:
+            os.remove(fp.name)
 
     @asyncio.coroutine
     def _ssl_fingerprint(self, port):
-        process = subprocess.Popen(['openssl', 's_client', '-connect', self.address + ':' + str(port)], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-        process.stdin.write(b'exit\n')
-        raw_cert = process.communicate()[0]
-        process = subprocess.Popen(['openssl', 'x509', '-fingerprint', '-noout', '-in', '/dev/stdin'], stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-        process.stdin.write(raw_cert)
-        fingerprint = process.communicate()[0].decode('utf-8')
-        if fingerprint:
-            fingerprint = fingerprint.strip('\n')
-            self.add_fingerprint("ssl", fingerprint.split('=')[1])
+        try:
+            fp = tempfile.NamedTemporaryFile(delete=False)
+
+            command = ['openssl', 's_client', '-connect', self.address + ':' + str(port)]
+            process = yield from asyncio.create_subprocess_exec(*command, stdout=fp, stdin=subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            process.stdin.write(b'exit\n')
+            yield from process.wait()
+            fp.close()
+
+            command = ['openssl', 'x509', '-fingerprint', '-noout', '-in', fp.name]
+            process = yield from asyncio.create_subprocess_exec(*command, stdout=subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+            output = yield from process.stdout.read()
+            yield from process.wait()
+
+            fingerprint = output.decode('utf-8')
+            if fingerprint:
+                fingerprint = fingerprint.strip('\n')
+                self.add_fingerprint("ssl", fingerprint.split('=')[1])
+        finally:
+            os.remove(fp.name)
 
     @asyncio.coroutine
     def _nbt_hostscan(self, port):
