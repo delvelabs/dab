@@ -32,6 +32,7 @@ import string
 import time
 import socket
 
+
 class NetBIOS:
 
     TYPE_SERVER = 0x20
@@ -39,7 +40,7 @@ class NetBIOS:
     HEADER_STRUCT_SIZE = struct.calcsize(HEADER_STRUCT_FORMAT)
 
 
-    def __init__(self, broadcast = True, listen_port = 0):
+    def __init__(self, broadcast=True, listen_port=0):
         """
         Instantiate a NetBIOS instance, and creates a IPv4 UDP socket to listen/send NBNS packets.
 
@@ -51,7 +52,7 @@ class NetBIOS:
         if self.broadcast:
             self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
         if listen_port:
-            self.sock.bind(( '', listen_port ))
+            self.sock.bind(('', listen_port))
 
     def close(self):
         """
@@ -64,11 +65,14 @@ class NetBIOS:
         self.sock.close()
         self.sock = None
 
-    def write(self, data, ip, port):
+    def _write(self, data, ip, port):
         assert self.sock, 'Socket is already closed'
-        self.sock.sendto(data, ( ip, port ))
+        self.sock.sendto(data, (ip, port))
 
-    def encode_name(self, name, type, scope=None):
+    def _encode_name(self, name, type, scope=None):
+        #
+        # Contributed by Jason Anderson
+        #
         """
         Perform first and second level encoding of name as specified in RFC 1001 (Section 4)
         """
@@ -92,17 +96,17 @@ class NetBIOS:
         else:
             return bytes(encoded_name + '\0', 'ascii')
 
-    def prepareNetNameQuery(self, trn_id, is_broadcast = True):
+    def _prepare_net_name_query(self, trn_id, is_broadcast=True):
         #
         # Contributed by Jason Anderson
         #
         header = struct.pack(self.HEADER_STRUCT_FORMAT,
                              trn_id, (is_broadcast and 0x0010) or 0x0000, 1, 0, 0, 0)
-        payload = self.encode_name('*', 0) + b'\x00\x21\x00\x01'
+        payload = self._encode_name('*', 0) + b'\x00\x21\x00\x01'
 
         return header + payload
 
-    def queryIPForName(self, ip, port = 137, timeout = 30):
+    def query_ip_for_name(self, ip, port=137, timeout=30):
         """
         Send a query to the machine with *ip* and hopes that the machine will reply back with its name.
 
@@ -117,27 +121,26 @@ class NetBIOS:
         assert self.sock, 'Socket is already closed'
 
         trn_id = random.randint(1, 0xFFFF)
-        data = self.prepareNetNameQuery(trn_id, False)
-        self.write(data, ip, port)
-        ret = self._pollForQueryPacket(trn_id, timeout)
+        data = self._prepare_net_name_query(trn_id, False)
+        self._write(data, ip, port)
+        ret = self._poll_for_query_packet(trn_id, timeout)
         if ret:
             return list(map(lambda s: s[0], filter(lambda s: s[1] == self.TYPE_SERVER, ret)))
         else:
             return None
 
-    #
-    # Protected Methods
-    #
-
-    def _pollForNetBIOSPacket(self, wait_trn_id, timeout):
-        end_time = time.time() - timeout
+    def _poll_for_query_packet(self, wait_trn_id, timeout):
+        #
+        # Contributed by Jason Anderson
+        #
+        end_time = time.time() + timeout
         while True:
             try:
-                _timeout = time.time()-end_time
-                if _timeout <= 0:
+                _current = time.time()
+                if _current >= end_time:
                     return None
 
-                ready, _, _ = select.select([ self.sock.fileno() ], [ ], [ ], _timeout)
+                ready, _, _ = select.select([self.sock.fileno()], [], [], end_time - _current)
                 if not ready:
                     return None
 
@@ -145,7 +148,7 @@ class NetBIOS:
                 if len(data) == 0:
                     raise NotConnectedError
 
-                trn_id, ret = self.decodePacket(data)
+                trn_id, ret = self._decode_ip_query_packet(data)
 
                 if trn_id == wait_trn_id:
                     return ret
@@ -156,37 +159,7 @@ class NetBIOS:
                 else:
                     raise ex
 
-    #
-    # Contributed by Jason Anderson
-    #
-    def _pollForQueryPacket(self, wait_trn_id, timeout):
-        end_time = time.time() - timeout
-        while True:
-            try:
-                _timeout = time.time()-end_time
-                if _timeout <= 0:
-                    return None
-
-                ready, _, _ = select.select([ self.sock.fileno() ], [ ], [ ], _timeout)
-                if not ready:
-                    return None
-
-                data, _ = self.sock.recvfrom(0xFFFF)
-                if len(data) == 0:
-                    raise NotConnectedError
-
-                trn_id, ret = self.decodeIPQueryPacket(data)
-
-                if trn_id == wait_trn_id:
-                    return ret
-            except select.error as ex:
-                if type(ex) is tuple:
-                    if ex[0] != errno.EINTR and ex[0] != errno.EAGAIN:
-                        raise ex
-                else:
-                    raise ex
-
-    def decodeIPQueryPacket(self, data):
+    def _decode_ip_query_packet(self, data):
         if len(data) < self.HEADER_STRUCT_SIZE:
             raise Exception
 
@@ -199,13 +172,13 @@ class NetBIOS:
         numnames = data[self.HEADER_STRUCT_SIZE + 44]
 
         if numnames > 0:
-            ret = [ ]
+            ret = []
             offset = self.HEADER_STRUCT_SIZE + 45
 
             for i in range(0, numnames):
                 mynme = data[offset:offset + 15]
                 mynme = mynme.strip()
-                ret.append(( str(mynme, 'ascii'), data[offset+15] ))
+                ret.append((str(mynme, 'ascii'), data[offset+15]))
                 offset += 18
 
             return trn_id, ret
