@@ -1,4 +1,3 @@
-"""
 Copyright (C) 2015-     Delve Labs inc. <info@delvelabs.ca>
 
 This software is provided 'as-is', without any express or implied warranty.
@@ -18,6 +17,4 @@ freely, subject to the following restrictions:
    misrepresented as being the original software.
 
 3. This notice cannot be removed or altered from any source distribution.
-"""
 
-from .core import Dab
