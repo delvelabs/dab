@@ -2,6 +2,7 @@
 # Dab, a host fingerprint generator
 # Delve Labs inc. 2015.
 
+import re
 import argparse
 import socket
 import ssl
@@ -24,10 +25,12 @@ TLS_PORTS = [443, 5002]
 NBT_PORTS = [139, 445]
 
 # Results hashes
-results = {'hostname' : '',
-           'ssh_fingerprints' : [],
-           'ssl_fingerprints' : [],
-           'nbt_hostname' : ''}
+fingerprints = []
+
+def add_fingerprint(type, value):
+    if value:  # Skip empty values from the result
+        type = re.sub(r'[^\w+]', '_', type)
+        fingerprints.append(dict(type=type, fingerprint=value))
 
 parser = argparse.ArgumentParser(description='Get a host fingerprint')
 parser.add_argument('host', metavar='target_host', type=str, nargs='?',
@@ -54,16 +57,16 @@ def list_open(ports):
 
 # Hash Confidence level:i
 # 1- TLS host fingerprint (preferred)
-# 2- Hostnamei hash
+# 2- Hostname hash
 # 3- All port checksum
 
 # Get hostname
 try:
-    hostname,_,_ = socket.gethostbyaddr(args.host)
+    hostname, _, _ = socket.gethostbyaddr(args.host)
+    add_fingerprint("hostname", hostname)
 except:
-    hostname = ''
+    pass
 
-results['hostname'] = hostname
 
 for port in list_open(SSH_PORTS):
     keyscan_out = check_output(['ssh-keyscan', args.host], stderr=subprocess.PIPE).decode('utf-8')
@@ -72,26 +75,26 @@ for port in list_open(SSH_PORTS):
     entries = keyscan_out.split('\n')
     for entry in entries:
         ip, htype, b64hash = entry.split(' ')
-        results['ssh_fingerprints'].append({'type': htype, 'hash': b64hash})
+        add_fingerprint(htype, b64hash)
 
 
 for port in list_open(TLS_PORTS):
     # Try to get a TLS fingerprint then exit 
-    process = subprocess.Popen(['openssl', 's_client', '-connect', args.host + ':' + str(port)],stdout=subprocess.PIPE,stdin=subprocess.PIPE, stderr=subprocess.PIPE)
-    process.stdin.write(b'Q\n')
+    process = subprocess.Popen(['openssl', 's_client', '-connect', args.host + ':' + str(port)],stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    process.stdin.write(b'exit\n')
     raw_cert = process.communicate()[0]
-    process = subprocess.Popen(['openssl', 'x509', '-fingerprint', '-noout', '-in', '/dev/stdin'],stdout=subprocess.PIPE,stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    process = subprocess.Popen(['openssl', 'x509', '-fingerprint', '-noout', '-in', '/dev/stdin'],stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     process.stdin.write(raw_cert)
     fingerprint = process.communicate()[0].decode('utf-8')
     if fingerprint:
         fingerprint = fingerprint.strip('\n')
-        results['ssl_fingerprints'].append(fingerprint.split('=')[1])
+        add_fingerprint("ssl", fingerprint.split('=')[1])
 
 
 for port in list_open(NBT_PORTS):
     client = NetBIOS.NetBIOS()
     nbt_name = client.queryIPForName(args.host, timeout=5)
     if len(nbt_name) > 0:
-        results['nbt_hostname'] = nbt_name[0]
+        add_fingerprint('nbt_hostname', nbt_name[0])
 
-print(repr(results))
+print(fingerprints)
