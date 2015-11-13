@@ -23,7 +23,7 @@ class Fingerprint:
         self.value = value
 
     def __repr__(self):
-        return "{type} [{value}]".format(**self.__dict__)
+        return "%(type)-15s %(value)s" % self.__dict__
 
 
 class Dab:
@@ -158,6 +158,7 @@ if __name__ == "__main__":
     loop = asyncio.get_event_loop()
     dab = Dab(args.host)
     loop.run_until_complete(dab.fingerprint())
-    print(dab.fingerprints)
+    loop.close()
 
-raise SystemExit()
+    for f in dab.fingerprints:
+        print(f)
