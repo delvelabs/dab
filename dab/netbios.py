@@ -24,6 +24,7 @@ freely, subject to the following restrictions:
 3. This notice cannot be removed or altered from any source distribution.
 
 """
+import asyncio
 import re
 import random
 import struct
@@ -34,10 +35,6 @@ import socket
 
 class NetBIOS:
 
-    TYPE_SERVER = 0x20
-    HEADER_STRUCT_FORMAT = '>HHHHHH'
-    HEADER_STRUCT_SIZE = struct.calcsize(HEADER_STRUCT_FORMAT)
-
 
     def __init__(self, broadcast=True, listen_port=0):
         """
@@ -46,11 +43,28 @@ class NetBIOS:
         :param boolean broadcast: A boolean flag to indicate if we should setup the listening UDP port in broadcast mode
         :param integer listen_port: Specifies the UDP port number to bind to for listening. If zero, OS will automatically select a free port number.
         """
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        if broadcast:
-            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-        if listen_port:
-            self.sock.bind(('', listen_port))
+        self.trn_id = random.randint(1, 0xFFFF)
+        self.transport = None
+        self.protocol = None
+
+        self.request_date = None
+
+    @asyncio.coroutine
+    def perform_request(self, ip, port=137):
+        loop = asyncio.get_event_loop()
+        # One protocol instance will be created to serve all client requests
+        transport, protocol = yield from loop.create_datagram_endpoint(
+            NetBiosProtocol, local_addr=("0.0.0.0", 0), family=socket.AF_INET)
+
+        sock = transport.get_extra_info('socket')
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+        protocol.send_request(self.trn_id, ip, port)
+
+        self.transport = transport
+        self.protocol = protocol
+
+        self.request_date = time.time()
 
     def close(self):
         """
@@ -60,8 +74,65 @@ class NetBIOS:
 
         :return: None
         """
-        self.sock.close()
+        self.transport.close()
         self.sock = None
+        self.transport = None
+        self.protocol = None
+
+
+    @asyncio.coroutine
+    def obtain_name(self, timeout=30):
+        since_request = time.time() - self.request_date
+        if since_request < timeout:
+            yield from asyncio.sleep(timeout - since_request)
+
+        return self.protocol.get_name(self.trn_id)
+
+
+class NetBiosProtocol:
+
+    TYPE_SERVER = 0x20
+
+    HEADER_STRUCT_FORMAT = '>HHHHHH'
+    HEADER_STRUCT_SIZE = struct.calcsize(HEADER_STRUCT_FORMAT)
+
+    def __init__(self):
+        self.requests = {}
+        self.transport = None
+
+    def get_name(self, id):
+        return self.requests.pop(id, None)
+
+    def connection_made(self, transport):
+        self.transport = transport
+
+
+    def datagram_received(self, data, addr):
+        if len(data) == 0:
+            raise NotConnectedError
+
+        trn_id, ret = self._decode_ip_query_packet(data)
+
+        out = [s[0] for s in ret if s[1] == self.TYPE_SERVER]
+        if trn_id in self.requests:
+            self.requests[trn_id] = out
+
+
+    def send_request(self, id, ip, port):
+        self.requests[id] = None
+        data = self._prepare_net_name_query(id, False)
+        self.transport.sendto(data, (ip, port))
+
+
+    def _prepare_net_name_query(self, trn_id, is_broadcast=True):
+        #
+        # Contributed by Jason Anderson
+        #
+        header = struct.pack(self.HEADER_STRUCT_FORMAT,
+                             trn_id, (is_broadcast and 0x0010) or 0x0000, 1, 0, 0, 0)
+        payload = self._encode_name('*', 0) + b'\x00\x21\x00\x01'
+
+        return header + payload
 
     def _encode_name(self, name, type, scope=None):
         #
@@ -88,61 +159,6 @@ class NetBIOS:
         else:
             return bytes(encoded_name + '\0', 'ascii')
 
-    def _prepare_net_name_query(self, trn_id, is_broadcast=True):
-        #
-        # Contributed by Jason Anderson
-        #
-        header = struct.pack(self.HEADER_STRUCT_FORMAT,
-                             trn_id, (is_broadcast and 0x0010) or 0x0000, 1, 0, 0, 0)
-        payload = self._encode_name('*', 0) + b'\x00\x21\x00\x01'
-
-        return header + payload
-
-    def query_ip_for_name(self, ip, port=137, timeout=30):
-        """
-        Send a query to the machine with *ip* and hopes that the machine will reply back with its name.
-
-        The implementation of this function is contributed by Jason Anderson.
-
-        :param string ip: If the NBNSProtocol instance was instianted with broadcast=True, then this parameter can be an empty string. We will leave it to the OS to determine an appropriate broadcast address.
-                          If the NBNSProtocol instance was instianted with broadcast=False, then you should provide a target IP to send the query.
-        :param integer port: The NetBIOS-NS port (IANA standard defines this port to be 137). You should not touch this parameter unless you know what you are doing.
-        :param integer/float timeout: Number of seconds to wait for a reply, after which the method will return None
-        :return: A list of string containing the names of the machine at *ip*. On timeout, returns None.
-        """
-        assert self.sock, 'Socket is already closed'
-
-        trn_id = random.randint(1, 0xFFFF)
-        data = self._prepare_net_name_query(trn_id, False)
-        self.sock.sendto(data, (ip, port))
-        ret = self._poll_for_query_packet(trn_id, timeout)
-        if ret:
-            return list(map(lambda s: s[0], filter(lambda s: s[1] == self.TYPE_SERVER, ret)))
-        else:
-            return None
-
-    def _poll_for_query_packet(self, wait_trn_id, timeout):
-        #
-        # Contributed by Jason Anderson
-        #
-        end_time = time.time() + timeout
-        try:
-            while True:
-                _current = time.time()
-                if _current >= end_time:
-                    return None
-
-                self.sock.settimeout(end_time - _current)
-                data, _ = self.sock.recvfrom(0xFFFF)
-                if len(data) == 0:
-                    raise NotConnectedError
-
-                trn_id, ret = self._decode_ip_query_packet(data)
-
-                if trn_id == wait_trn_id:
-                    return ret
-        except socket.timeout:
-            return None
 
     def _decode_ip_query_packet(self, data):
         if len(data) < self.HEADER_STRUCT_SIZE:

@@ -67,9 +67,11 @@ class Dab:
         except:
             pass
 
+        client = yield from self._nbt_hostscan()
+
         yield from self._apply_on_open_ports(self.SSH_PORTS, self._ssh_keyscan)
         yield from self._apply_on_open_ports(self.TLS_PORTS, self._ssl_fingerprint)
-        yield from self._nbt_hostscan()
+        yield from self._nbt_read_response(client)
 
 
     @asyncio.coroutine
@@ -129,7 +131,12 @@ class Dab:
     @asyncio.coroutine
     def _nbt_hostscan(self):
         client = NetBIOS()
-        nbt_name = client.query_ip_for_name(self.address, timeout=0.5)
+        yield from client.perform_request(self.address)
+        return client
+
+    @asyncio.coroutine
+    def _nbt_read_response(self, client):
+        nbt_name = yield from client.obtain_name(timeout=1)
         if nbt_name and len(nbt_name) > 0:
             self.add_fingerprint('nbt_hostname', nbt_name[0])
         
