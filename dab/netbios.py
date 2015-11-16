@@ -36,7 +36,7 @@ import socket
 class NetBIOS:
 
 
-    def __init__(self, broadcast=True, listen_port=0):
+    def __init__(self, protocol=None):
         """
         Instantiate a NetBIOS instance, and creates a IPv4 UDP socket to listen/send NBNS packets.
 
@@ -51,19 +51,10 @@ class NetBIOS:
 
     @asyncio.coroutine
     def perform_request(self, ip, port=137):
-        loop = asyncio.get_event_loop()
-        # One protocol instance will be created to serve all client requests
-        transport, protocol = yield from loop.create_datagram_endpoint(
-            NetBiosProtocol, local_addr=("0.0.0.0", 0), family=socket.AF_INET)
+        if not self.protocol:
+            self.transport, self.protocol = yield from create_connection()
 
-        sock = transport.get_extra_info('socket')
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-
-        protocol.send_request(self.trn_id, ip, port)
-
-        self.transport = transport
-        self.protocol = protocol
-
+        self.protocol.send_request(self.trn_id, ip, port)
         self.request_date = time.time()
 
     def close(self):
@@ -74,10 +65,12 @@ class NetBIOS:
 
         :return: None
         """
-        self.transport.close()
-        self.sock = None
-        self.transport = None
-        self.protocol = None
+        if self.transport:
+            # Let the protocol be re-used
+            self.transport.close()
+            self.sock = None
+            self.transport = None
+            self.protocol = None
 
 
     @asyncio.coroutine
@@ -92,7 +85,6 @@ class NetBIOS:
 class NetBiosProtocol:
 
     TYPE_SERVER = 0x20
-
     HEADER_STRUCT_FORMAT = '>HHHHHH'
     HEADER_STRUCT_SIZE = struct.calcsize(HEADER_STRUCT_FORMAT)
 
@@ -164,7 +156,8 @@ class NetBiosProtocol:
         if len(data) < self.HEADER_STRUCT_SIZE:
             raise Exception
 
-        trn_id, code, question_count, answer_count, authority_count, additional_count = struct.unpack(self.HEADER_STRUCT_FORMAT, data[:self.HEADER_STRUCT_SIZE])
+        trn_id, code, question_count, answer_count, authority_count, additional_count = \
+            struct.unpack(self.HEADER_STRUCT_FORMAT, data[:self.HEADER_STRUCT_SIZE])
 
         is_response = bool((code >> 15) & 0x01)
         opcode = (code >> 11) & 0x0F
@@ -187,3 +180,14 @@ class NetBiosProtocol:
             return trn_id, None
 
 
+@asyncio.coroutine
+def create_connection():
+    loop = asyncio.get_event_loop()
+    # One protocol instance will be created to serve all client requests
+    transport, protocol = yield from loop.create_datagram_endpoint(
+        NetBiosProtocol, local_addr=("0.0.0.0", 0), family=socket.AF_INET)
+
+    sock = transport.get_extra_info('socket')
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+
+    return transport, protocol
