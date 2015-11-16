@@ -91,7 +91,7 @@ class Dab:
             yield from proc.wait()
             fp.close()
 
-            command = ["ssh-keygen", "-l", "-f", fp.name]
+            command = ["ssh-keygen", "-E", "sha256", "-l", "-f", fp.name]
             proc = yield from asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             keyscan_out = yield from proc.stdout.read()
             yield from proc.wait()
