@@ -69,14 +69,18 @@ class Dab:
 
     @asyncio.coroutine
     def fingerprint(self):
-        hostnames = yield from self.dns_client.lookup(self.address)
-        for hostname in hostnames:
+        # Perform all checks concurrently
+        results = yield from asyncio.gather(
+            self.dns_client.lookup(self.address),
+            self._nbt_hostscan(),
+            self._apply_on_open_ports(self.SSH_PORTS, self._ssh_keyscan),
+            self._apply_on_open_ports(self.TLS_PORTS, self._ssl_fingerprint)
+        )
+
+        for hostname in results[0]:
             self.add_fingerprint("hostname", hostname)
 
-        yield from self._nbt_hostscan()
-
-        yield from self._apply_on_open_ports(self.SSH_PORTS, self._ssh_keyscan)
-        yield from self._apply_on_open_ports(self.TLS_PORTS, self._ssl_fingerprint)
+        # Response arrives after specified timeout
         yield from self._nbt_read_response()
 
 
