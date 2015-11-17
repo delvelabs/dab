@@ -45,6 +45,9 @@ class Fingerprint:
     def __eq__(self, other):
         return self.type == other.type and self.value == other.value
 
+    def __lt__(self, other):
+        return (self.type, self.value) < (other.type, other.value)
+
 
 class Dab:
 

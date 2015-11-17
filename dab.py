@@ -47,5 +47,5 @@ if __name__ == "__main__":
     loop.run_until_complete(dab.fingerprint())
     loop.close()
 
-    for f in dab.fingerprints:
+    for f in sorted(dab.fingerprints):
         print(f)
