@@ -43,19 +43,22 @@ class NetBIOS:
         :param boolean broadcast: A boolean flag to indicate if we should setup the listening UDP port in broadcast mode
         :param integer listen_port: Specifies the UDP port number to bind to for listening. If zero, OS will automatically select a free port number.
         """
-        self.trn_id = random.randint(1, 0xFFFF)
         self.transport = None
         self.protocol = None
 
         self.request_date = None
+        self.pending_requests = {}
 
     @asyncio.coroutine
     def perform_request(self, ip, port=137):
         if not self.protocol:
             self.transport, self.protocol = yield from create_connection()
 
-        self.protocol.send_request(self.trn_id, ip, port)
+        trn_id = random.randint(1, 0xFFFF)
+        self.protocol.send_request(trn_id, ip, port)
         self.request_date = time.time()
+
+        self.pending_requests[ip] = trn_id
 
     def close(self):
         """
@@ -74,12 +77,15 @@ class NetBIOS:
 
 
     @asyncio.coroutine
-    def obtain_name(self, timeout=30):
+    def obtain_name(self, ip, timeout=30):
         since_request = time.time() - self.request_date
         if since_request < timeout:
             yield from asyncio.sleep(timeout - since_request)
 
-        return self.protocol.get_name(self.trn_id)
+        trn_id = self.pending_requests.pop(ip, None)
+
+        if trn_id is not None:
+            return self.protocol.get_name(trn_id)
 
 
 class NetBiosProtocol:

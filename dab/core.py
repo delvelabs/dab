@@ -22,11 +22,12 @@ freely, subject to the following restrictions:
 
 import os
 import re
-import socket
 import tempfile
 import asyncio
 
 from .netbios import NetBIOS
+from .dns import DNS
+
 
 
 class Fingerprint:
@@ -38,6 +39,12 @@ class Fingerprint:
     def __repr__(self):
         return "%(type)-15s %(value)s" % self.__dict__
 
+    def __hash__(self):
+        return hash((self.type, self.value))
+
+    def __eq__(self, other):
+        return self.type == other.type and self.value == other.value
+
 
 class Dab:
 
@@ -47,31 +54,30 @@ class Dab:
     # TLS-enabled Ports
     TLS_PORTS = [443, 5002] 
 
-    def __init__(self, address):
+    def __init__(self, address, netbios_client=None, dns_client=None):
         self.address = address
-        self.fingerprints = []
+        self.fingerprints = set()
+        self.netbios_client = netbios_client or NetBIOS()
+        self.dns_client = dns_client or DNS()
 
     
     def add_fingerprint(self, type, value):
         if value:  # Skip empty values from the result
             type = re.sub(r'[^\w+]', '_', type).lower()
-            self.fingerprints.append(Fingerprint(type=type, value=value))
+            self.fingerprints.add(Fingerprint(type=type, value=value))
 
 
     @asyncio.coroutine
     def fingerprint(self):
-        try:
-            # FIXME : No asyncio equivalent?
-            hostname, _, _ = socket.gethostbyaddr(self.address)
+        hostnames = yield from self.dns_client.lookup(self.address)
+        for hostname in hostnames:
             self.add_fingerprint("hostname", hostname)
-        except:
-            pass
 
-        client = yield from self._nbt_hostscan()
+        yield from self._nbt_hostscan()
 
         yield from self._apply_on_open_ports(self.SSH_PORTS, self._ssh_keyscan)
         yield from self._apply_on_open_ports(self.TLS_PORTS, self._ssl_fingerprint)
-        yield from self._nbt_read_response(client)
+        yield from self._nbt_read_response()
 
 
     @asyncio.coroutine
@@ -130,13 +136,11 @@ class Dab:
 
     @asyncio.coroutine
     def _nbt_hostscan(self):
-        client = NetBIOS()
-        yield from client.perform_request(self.address)
-        return client
+        yield from self.netbios_client.perform_request(self.address)
 
     @asyncio.coroutine
-    def _nbt_read_response(self, client):
-        nbt_name = yield from client.obtain_name(timeout=1)
+    def _nbt_read_response(self):
+        nbt_name = yield from self.netbios_client.obtain_name(self.address, timeout=1)
         if nbt_name and len(nbt_name) > 0:
             self.add_fingerprint('nbt_hostname', nbt_name[0])
         
