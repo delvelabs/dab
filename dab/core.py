@@ -27,6 +27,7 @@ import asyncio
 
 from .netbios import NetBIOS
 from .dns import DNS
+from .ssh import SSH
 
 
 
@@ -37,7 +38,7 @@ class Fingerprint:
         self.value = value
 
     def __repr__(self):
-        return "%(type)-15s %(value)s" % self.__dict__
+        return "%(type)-25s %(value)s" % self.__dict__
 
     def __hash__(self):
         return hash((self.type, self.value))
@@ -57,11 +58,12 @@ class Dab:
     # TLS-enabled Ports
     TLS_PORTS = [443, 5002] 
 
-    def __init__(self, address, netbios_client=None, dns_client=None):
+    def __init__(self, address, netbios_client=None, dns_client=None, ssh_client=None):
         self.address = address
         self.fingerprints = set()
         self.netbios_client = netbios_client or NetBIOS()
         self.dns_client = dns_client or DNS()
+        self.ssh_client = ssh_client or SSH()
 
     
     def add_fingerprint(self, type, value):
@@ -76,12 +78,14 @@ class Dab:
         results = yield from asyncio.gather(
             self.dns_client.lookup(self.address),
             self._nbt_hostscan(),
-            self._apply_on_open_ports(self.SSH_PORTS, self._ssh_keyscan),
+            self._apply_on_open_ports(self.SSH_PORTS, lambda port: self.ssh_client.keyscan(self.address, port)),
             self._apply_on_open_ports(self.TLS_PORTS, self._ssl_fingerprint)
         )
 
         for hostname in results[0]:
             self.add_fingerprint("hostname", hostname)
+        for type, hash in results[2]:
+            self.add_fingerprint(type, hash)
 
         # Response arrives after specified timeout
         yield from self._nbt_read_response()
@@ -89,34 +93,15 @@ class Dab:
 
     @asyncio.coroutine
     def _apply_on_open_ports(self, ports, callback):
+        rv = []
         for port in ports:
             is_open = yield from self.is_open(port)
             if is_open:
-                yield from callback(port)
-
-    @asyncio.coroutine
-    def _ssh_keyscan(self, port):
-        try:
-            fp = tempfile.NamedTemporaryFile(delete=False)
-
-            command = ['ssh-keyscan', "-p", str(port), self.address]
-            proc = yield from asyncio.create_subprocess_exec(*command, stdout=fp, stderr=asyncio.subprocess.DEVNULL)
-            yield from proc.wait()
-            fp.close()
-
-            command = ["ssh-keygen", "-E", "sha256", "-l", "-f", fp.name]
-            proc = yield from asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-            keyscan_out = yield from proc.stdout.read()
-            yield from proc.wait()
-
-            keyscan_out = keyscan_out.decode('utf8').strip('\n')
-            entries = keyscan_out.split('\n')
-            for entry in entries:
-                bytecount, hash, address, type = entry.split(' ')
-                self.add_fingerprint("%s_%s" % (type.strip('()'), bytecount), hash)
-
-        finally:
-            os.remove(fp.name)
+                result = yield from callback(port)
+                if result:
+                    rv = rv + result
+        
+        return rv
 
     @asyncio.coroutine
     def _ssl_fingerprint(self, port):
