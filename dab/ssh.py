@@ -12,8 +12,11 @@ class SSH:
 
             command = ['ssh-keyscan', "-p", str(port), address]
             proc = yield from asyncio.create_subprocess_exec(*command, stdout=fp, stderr=asyncio.subprocess.DEVNULL)
-            yield from proc.wait()
+            returncode = yield from proc.wait()
             fp.close()
+
+            if returncode != 0:
+                return []
 
             sha256 = yield from self.generate_fingerprint(["ssh-keygen", "-E", "sha256", "-l", "-f", fp.name])
             md5 = yield from self.generate_fingerprint(["ssh-keygen", "-E", "md5", "-l", "-f", fp.name])
@@ -30,9 +33,12 @@ class SSH:
     def generate_fingerprint(self, command):
         proc = yield from asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
         keyscan_out = yield from proc.stdout.read()
-        yield from proc.wait()
+        returncode = yield from proc.wait()
 
         if not keyscan_out:
+            return []
+
+        if returncode != 0:
             return []
 
         rv = []
@@ -40,7 +46,11 @@ class SSH:
 
         entries = keyscan_out.split('\n')
         for entry in entries:
-            bytecount, full_hash, address, type = entry.split(' ')
+            parts = entry.split(' ')
+            if len(parts) != 4:
+                continue  # Not a standard output, ignore
+
+            bytecount, full_hash, address, type = parts
             if full_hash.startswith("MD5:"):
                 hash_type, hash = "md5", full_hash[4:]
             elif full_hash.startswith("SHA256:"):
