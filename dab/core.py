@@ -111,6 +111,7 @@ class Dab:
             command = ['openssl', 's_client', '-connect', self.address + ':' + str(port)]
             process = yield from asyncio.create_subprocess_exec(*command, stdout=fp, stdin=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             process.stdin.write(b'exit\n')
+            process.stdin.close()
             yield from process.wait()
             fp.close()
 
