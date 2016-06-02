@@ -6,8 +6,8 @@ import ipaddress
 
 class DNS:
 
-    def __init__(self):
-        self.resolver = aiodns.DNSResolver(loop=asyncio.get_event_loop())
+    def __init__(self, nameservers=None):
+        self.resolver = aiodns.DNSResolver(loop=asyncio.get_event_loop(), nameservers=nameservers)
 
 
     @asyncio.coroutine

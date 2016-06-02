@@ -30,20 +30,23 @@ import sys
 
 from subprocess import check_output
 from dab import Dab
+from dab.dns import DNS
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Get a host fingerprint')
+    parser.add_argument('--nameservers', metavar='nameservers', type=lambda x: x.split(','),
+                        help="Comma-separted list of nameservers to use in resolution")
     parser.add_argument('host', metavar='target_host', type=str, nargs='?',
                         help='a target host')
 
     args = parser.parse_args()
-    if len(sys.argv) <= 1:
+    if not args.host:
         parser.print_help()
         raise SystemExit()
 
     loop = asyncio.get_event_loop()
-    dab = Dab(args.host)
+    dab = Dab(args.host, dns_client=DNS(nameservers=args.nameservers or None))
     loop.run_until_complete(dab.fingerprint())
     loop.close()
 
