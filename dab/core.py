@@ -139,12 +139,16 @@ class Dab:
         
     @asyncio.coroutine
     def is_open(self, port):
+        writer = None
+
         try:
             future = asyncio.open_connection(self.address, port)
             reader, writer = yield from asyncio.wait_for(future, timeout=0.5)
-            writer.close()
 
             return True
         except:
             return False
+        finally:
+            if writer:
+                writer.close()
 

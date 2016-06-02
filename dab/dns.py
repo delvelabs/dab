@@ -13,6 +13,7 @@ class DNS:
     @asyncio.coroutine
     def lookup(self, address):
         try:
+            ip = None
             try:
                 ip = ipaddress.ip_address(address)
             except ValueError:
@@ -24,7 +25,7 @@ class DNS:
             result = yield from self.resolver.query(lookup, 'PTR')
             return [result.name]
         except aiodns.error.DNSError:
-            return self.do_fallback(ip)
+            return self.do_fallback(ip or address)
 
     def do_fallback(self, ip):
         try:
@@ -32,7 +33,7 @@ class DNS:
             # other local configurations
             hostname, _, _ = socket.gethostbyaddr(str(ip))
             return [hostname]
-        except socket.herror:
+        except (socket.herror, socket.gaierror):
             return []
 
     def get_lookup(self, ip):

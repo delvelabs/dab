@@ -115,6 +115,9 @@ class NetBiosProtocol:
         if trn_id in self.requests:
             self.requests[trn_id] = out
 
+    def error_received(self, exc):
+        # Same as a drop
+        pass
 
     def send_request(self, id, ip, port):
         self.requests[id] = None
