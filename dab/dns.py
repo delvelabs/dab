@@ -9,20 +9,18 @@ class DNS:
     def __init__(self, nameservers=None):
         self.resolver = aiodns.DNSResolver(loop=asyncio.get_event_loop(), nameservers=nameservers)
 
-
-    @asyncio.coroutine
-    def lookup(self, address):
+    async def lookup(self, address):
         try:
             ip = None
             try:
                 ip = ipaddress.ip_address(address)
             except ValueError:
                 # Resolve the domain name
-                result = yield from self.resolver.query(address, 'A')
+                result = await self.resolver.query(address, 'A')
                 ip = ipaddress.ip_address(result[0].host)
 
             lookup = self.get_lookup(ip)
-            result = yield from self.resolver.query(lookup, 'PTR')
+            result = await self.resolver.query(lookup, 'PTR')
             return [result.name]
         except aiodns.error.DNSError:
             return self.do_fallback(ip or address)

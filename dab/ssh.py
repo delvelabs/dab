@@ -4,36 +4,37 @@ import tempfile
 
 
 class SSH:
-    
-    @asyncio.coroutine
-    def keyscan(self, address, port):
+
+    async def keyscan(self, address, port):
         try:
             fp = tempfile.NamedTemporaryFile(delete=False)
 
             command = ['ssh-keyscan', "-p", str(port), address]
-            proc = yield from asyncio.create_subprocess_exec(*command, stdout=fp, stderr=asyncio.subprocess.DEVNULL)
-            returncode = yield from proc.wait()
+            proc = await asyncio.create_subprocess_exec(*command, stdout=fp, stderr=asyncio.subprocess.DEVNULL)
+            returncode = await proc.wait()
             fp.close()
 
             if returncode != 0:
                 return []
 
-            sha256 = yield from self.generate_fingerprint(["ssh-keygen", "-E", "sha256", "-l", "-f", fp.name])
-            md5 = yield from self.generate_fingerprint(["ssh-keygen", "-E", "md5", "-l", "-f", fp.name])
+            sha256 = await self.generate_fingerprint(["ssh-keygen", "-E", "sha256", "-l", "-f", fp.name])
+            md5 = await self.generate_fingerprint(["ssh-keygen", "-E", "md5", "-l", "-f", fp.name])
             combined = sha256 + md5
             if combined:
                 return combined
 
-            default = yield from self.generate_fingerprint(["ssh-keygen", "-l", "-f", fp.name])
+            default = await self.generate_fingerprint(["ssh-keygen", "-l", "-f", fp.name])
             return default
 
         finally:
             os.remove(fp.name)
 
-    def generate_fingerprint(self, command):
-        proc = yield from asyncio.create_subprocess_exec(*command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
-        keyscan_out = yield from proc.stdout.read()
-        returncode = yield from proc.wait()
+    async def generate_fingerprint(self, command):
+        proc = await asyncio.create_subprocess_exec(*command,
+                                                    stdout=asyncio.subprocess.PIPE,
+                                                    stderr=asyncio.subprocess.DEVNULL)
+        keyscan_out = await proc.stdout.read()
+        returncode = await proc.wait()
 
         if not keyscan_out:
             return []

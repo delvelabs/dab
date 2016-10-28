@@ -35,13 +35,13 @@ import socket
 
 class NetBIOS:
 
-
     def __init__(self, protocol=None):
         """
         Instantiate a NetBIOS instance, and creates a IPv4 UDP socket to listen/send NBNS packets.
 
         :param boolean broadcast: A boolean flag to indicate if we should setup the listening UDP port in broadcast mode
-        :param integer listen_port: Specifies the UDP port number to bind to for listening. If zero, OS will automatically select a free port number.
+        :param integer listen_port: Specifies the UDP port number to bind to for listening. If zero, OS will
+                                    automatically select a free port number.
         """
         self.transport = None
         self.protocol = None
@@ -49,10 +49,9 @@ class NetBIOS:
         self.request_date = None
         self.pending_requests = {}
 
-    @asyncio.coroutine
-    def perform_request(self, ip, port=137):
+    async def perform_request(self, ip, port=137):
         if not self.protocol:
-            self.transport, self.protocol = yield from create_connection()
+            self.transport, self.protocol = await create_connection()
 
         trn_id = random.randint(1, 0xFFFF)
         self.protocol.send_request(trn_id, ip, port)
@@ -75,12 +74,10 @@ class NetBIOS:
             self.transport = None
             self.protocol = None
 
-
-    @asyncio.coroutine
-    def obtain_name(self, ip, timeout=30):
+    async def obtain_name(self, ip, timeout=30):
         since_request = time.time() - self.request_date
         if since_request < timeout:
-            yield from asyncio.sleep(timeout - since_request)
+            await asyncio.sleep(timeout - since_request)
 
         trn_id = self.pending_requests.pop(ip, None)
 
@@ -104,7 +101,6 @@ class NetBiosProtocol:
     def connection_made(self, transport):
         self.transport = transport
 
-
     def datagram_received(self, data, addr):
         if len(data) == 0:
             raise NotConnectedError
@@ -123,7 +119,6 @@ class NetBiosProtocol:
         self.requests[id] = None
         data = self._prepare_net_name_query(id, False)
         self.transport.sendto(data, (ip, port))
-
 
     def _prepare_net_name_query(self, trn_id, is_broadcast=True):
         #
@@ -160,7 +155,6 @@ class NetBiosProtocol:
         else:
             return bytes(encoded_name + '\0', 'ascii')
 
-
     def _decode_ip_query_packet(self, data):
         if len(data) < self.HEADER_STRUCT_SIZE:
             raise Exception
@@ -189,14 +183,17 @@ class NetBiosProtocol:
             return trn_id, None
 
 
-@asyncio.coroutine
-def create_connection():
+async def create_connection():
     loop = asyncio.get_event_loop()
     # One protocol instance will be created to serve all client requests
-    transport, protocol = yield from loop.create_datagram_endpoint(
+    transport, protocol = await loop.create_datagram_endpoint(
         NetBiosProtocol, local_addr=("0.0.0.0", 0), family=socket.AF_INET)
 
     sock = transport.get_extra_info('socket')
     sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
 
     return transport, protocol
+
+
+class NotConnectedError(ConnectionError):
+    pass
