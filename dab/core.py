@@ -57,6 +57,8 @@ class Dab:
     # TLS-enabled Ports
     TLS_PORTS = [443, 5002]
 
+    alternative_names = re.compile(r'DNS:(?P<name>[^,\s]+)')
+
     def __init__(self, address, netbios_client=None, dns_client=None, ssh_client=None):
         self.address = address
         self.fingerprints = set()
@@ -75,7 +77,8 @@ class Dab:
             self.dns_client.lookup(self.address),
             self._nbt_hostscan(),
             self._apply_on_open_ports(self.SSH_PORTS, lambda port: self.ssh_client.keyscan(self.address, port)),
-            self._apply_on_open_ports(self.TLS_PORTS, self._ssl_fingerprint)
+            self._apply_on_open_ports(self.TLS_PORTS, self._ssl_fingerprint),
+            self._apply_on_open_ports(self.TLS_PORTS, self._ssl_alternative_names)
         )
 
         for hostname in results[0]:
@@ -98,30 +101,37 @@ class Dab:
         return rv
 
     async def _ssl_fingerprint(self, port):
+        fingerprint = await self._ssl_process(port, [], ['-fingerprint'])
+        if fingerprint:
+            fingerprint = fingerprint.strip('\n')
+            self.add_fingerprint("ssl", fingerprint.split('=')[1])
+
+    async def _ssl_alternative_names(self, port):
+        output = await self._ssl_process(port, ['-showcerts'], ['-text'])
+
+        names = self.alternative_names.findall(output)
+        for name in names:
+            self.add_fingerprint('san_hostname', name)
+
+    async def _ssl_process(self, port, connect_args, decode_args):
         try:
             fp = tempfile.NamedTemporaryFile(delete=False)
 
-            command = ['openssl', 's_client', '-connect', self.address + ':' + str(port)]
+            command = ['openssl', 's_client', *connect_args, '-connect', self.address + ':' + str(port)]
             process = await asyncio.create_subprocess_exec(*command,
                                                            stdout=fp,
-                                                           stdin=asyncio.subprocess.PIPE,
+                                                           stdin=asyncio.subprocess.DEVNULL,
                                                            stderr=asyncio.subprocess.DEVNULL)
-            process.stdin.write(b'exit\n')
-            process.stdin.close()
-            await process.wait()
+            await process.communicate()
             fp.close()
 
-            command = ['openssl', 'x509', '-fingerprint', '-noout', '-in', fp.name]
+            command = ['openssl', 'x509', *decode_args, '-noout', '-in', fp.name]
             process = await asyncio.create_subprocess_exec(*command,
                                                            stdout=asyncio.subprocess.PIPE,
                                                            stderr=asyncio.subprocess.PIPE)
-            output = await process.stdout.read()
-            await process.wait()
+            output, err = await process.communicate()
 
-            fingerprint = output.decode('utf-8')
-            if fingerprint:
-                fingerprint = fingerprint.strip('\n')
-                self.add_fingerprint("ssl", fingerprint.split('=')[1])
+            return output.decode('utf-8')
         finally:
             os.remove(fp.name)
 
