@@ -31,6 +31,9 @@ import struct
 import string
 import time
 import socket
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class NetBIOS:
@@ -107,8 +110,8 @@ class NetBiosProtocol:
 
         trn_id, ret = self._decode_ip_query_packet(data)
 
-        out = [s[0] for s in ret if s[1] == self.TYPE_SERVER]
-        if trn_id in self.requests:
+        if ret is not None and trn_id in self.requests:
+            out = [s[0] for s in ret if s[1] == self.TYPE_SERVER]
             self.requests[trn_id] = out
 
     def error_received(self, exc):
@@ -173,9 +176,12 @@ class NetBiosProtocol:
             offset = self.HEADER_STRUCT_SIZE + 45
 
             for i in range(0, numnames):
-                mynme = data[offset:offset + 15]
-                mynme = mynme.strip()
-                ret.append((str(mynme, 'ascii'), data[offset+15]))
+                try:
+                    raw = data[offset:offset + 15]
+                    mynme = raw.strip()
+                    ret.append((str(mynme, 'ascii'), data[offset+15]))
+                except UnicodeDecodeError:
+                    logger.warn("Failure to decode hostname: %s", raw)
                 offset += 18
 
             return trn_id, ret
