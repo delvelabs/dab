@@ -169,24 +169,30 @@ class NetBiosProtocol:
         opcode = (code >> 11) & 0x0F
         flags = (code >> 4) & 0x7F
         rcode = code & 0x0F
-        numnames = data[self.HEADER_STRUCT_SIZE + 44]
 
-        if numnames > 0:
-            ret = []
-            offset = self.HEADER_STRUCT_SIZE + 45
+        try:
+            numnames = data[self.HEADER_STRUCT_SIZE + 44]
 
-            for i in range(0, numnames):
-                try:
-                    raw = data[offset:offset + 15]
-                    mynme = raw.strip()
-                    ret.append((str(mynme, 'ascii'), data[offset+15]))
-                except UnicodeDecodeError:
-                    logger.warn("Failure to decode hostname: %s", raw)
-                offset += 18
+            if numnames > 0:
+                ret = []
+                offset = self.HEADER_STRUCT_SIZE + 45
 
-            return trn_id, ret
-        else:
-            return trn_id, None
+                for i in range(0, numnames):
+                    try:
+                        raw = data[offset:offset + 15]
+                        mynme = raw.strip()
+                        ret.append((str(mynme, 'ascii'), data[offset+15]))
+                    except UnicodeDecodeError:
+                        logger.warn("Failure to decode hostname: %s", raw)
+                    offset += 18
+
+                return trn_id, ret
+        except IndexError:
+            # Bugfix: Unhandled exception due to short NBNS queries
+            # Fix from: https://github.com/miketeo/pysmb/pull/149/commits/ef9990cb04f362771e12ded57aeff37703e786d3
+            pass
+
+        return trn_id, None
 
 
 async def create_connection():
