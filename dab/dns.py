@@ -24,7 +24,7 @@ class DNS:
 
             lookup = self.get_lookup(ip)
             result = await self._query(lookup, 'PTR')
-            return [result.name]
+            return self._all_hostnames(result.name, result.aliases)
         except asyncio.TimeoutError:
             return await self.loop.run_in_executor(None, self.do_fallback, ip or address)
         except aiodns.error.DNSError:
@@ -34,10 +34,13 @@ class DNS:
         try:
             # Fallback to the synchronous method that also inclused /etc/hosts or
             # other local configurations
-            hostname, _, _ = socket.gethostbyaddr(str(ip))
-            return [hostname]
+            hostname, aliases, _ = socket.gethostbyaddr(str(ip))
+            return self._all_hostnames(hostname, aliases)
         except (socket.herror, socket.gaierror):
             return []
+
+    def _all_hostnames(self, name, aliases):
+        return list({name} | set(aliases))
 
     def get_lookup(self, ip):
         reverse_ip = ".".join(str(ip).split(".")[::-1])
