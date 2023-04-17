@@ -59,12 +59,15 @@ class Dab:
 
     alternative_names = re.compile(r'DNS:(?P<name>[^,\s]+)')
 
-    def __init__(self, address, netbios_client=None, dns_client=None, ssh_client=None):
+    def __init__(self, address, *,
+                 netbios_client=None, dns_client=None, ssh_client=None,
+                 per_port_timeout=2.0):
         self.address = address
         self.fingerprints = set()
         self.netbios_client = netbios_client or NetBIOS()
         self.dns_client = dns_client or DNS()
         self.ssh_client = ssh_client or SSH()
+        self.per_port_timeout = per_port_timeout
 
     def add_fingerprint(self, type, value):
         if value:  # Skip empty values from the result
@@ -94,9 +97,12 @@ class Dab:
         for port in ports:
             is_open = await self.is_open(port)
             if is_open:
-                result = await callback(port)
-                if result:
-                    rv = rv + result
+                try:
+                    result = await asyncio.wait_for(callback(port), timeout=self.per_port_timeout)
+                    if result:
+                        rv = rv + result
+                except asyncio.TimeoutError:
+                    pass
 
         return rv
 
@@ -151,7 +157,7 @@ class Dab:
             reader, writer = await asyncio.wait_for(future, timeout=0.5)
 
             return True
-        except:
+        except Exception:
             return False
         finally:
             if writer:
